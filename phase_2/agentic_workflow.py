@@ -12,8 +12,9 @@ load_dotenv()
 openai_api_key = os.getenv("OPENAI_API_KEY")
 
 # load the product spec
-with open("phase_2/Product-Spec-Email-Router.txt", "r") as file:
-    product_spec = file.read()
+path = os.path.join(os.path.dirname(__file__), "Product-Spec-Email-Router.txt")
+with open(path, "r", encoding="utf-8") as f:
+    product_spec = f.read()
 
 # Instantiate all the agents
 
@@ -147,39 +148,89 @@ routing_agent = RoutingAgent(
 
 # Job function persona support functions
 def product_manager_support_function(query: str) -> str:
-    response = product_manager_knowledge_agent.get_response(query)
-    evaluation = product_manager_evaluation_agent.evaluate(response, query)
-    return evaluation
+    response = product_manager_knowledge_agent.respond(query)
+    evaluation = product_manager_evaluation_agent.evaluate(response)
+    return evaluation["final_response"]
 
 def program_manager_support_function(query: str) -> str:
-    response = program_manager_knowledge_agent.get_response(query)
-    evaluation = program_manager_evaluation_agent.evaluate(response, query)
-    return evaluation
+    response = program_manager_knowledge_agent.respond(query)
+    evaluation = program_manager_evaluation_agent.evaluate(response)
+    return evaluation["final_response"]
 
 def development_engineer_support_function(query: str) -> str:
-    response = development_engineer_knowledge_agent.get_response(query)
-    evaluation = development_engineer_evaluation_agent.evaluate(response, query)
-    return evaluation
+    response = development_engineer_knowledge_agent.respond(query)
+    evaluation = development_engineer_evaluation_agent.evaluate(response)
+    return evaluation["final_response"]
 
 # Run the workflow
-
 print("\n*** Workflow execution started ***\n")
-# Workflow Prompt
-# ****
-workflow_prompt = "Create a development plan for the product described in the following product specification: \n" + product_spec
-# ****
-print(f"Task to complete in this workflow, workflow prompt = {workflow_prompt}")
 
-print("\nDefining workflow steps from the workflow prompt")
+# Prompt principal
+workflow_prompt = "Create a development plan for the product described in the following product specification:\n" + product_spec
+print(f"Task to complete in this workflow:\n{workflow_prompt}\n")
 
+# Extraer pasos como lista de strings
 workflow_steps = action_planning_agent.extract_steps_from_prompt(workflow_prompt)
-completed_steps = []
+print(f"Workflow steps defined:\n{workflow_steps}\n")
+
+# Ejecutar cada paso con enrutamiento
+project_plan = {
+    "user_stories": [],
+    "features": [],
+    "tasks": [],
+    "timeline": [],
+    "review": []
+}
 
 for step in workflow_steps:
-    print(f"\nExecuting step: {step}")
-    routed_response = routing_agent.route(step)
-    completed_steps.append(routed_response)
-    print(f"Step result: {routed_response}")
+    step_lower = step.lower()
+    if step_lower.startswith(("development plan", "identify user stories", "group user stories", "define tasks", "create a development timeline", "review and iterate")):
+        continue  # Saltar encabezados
 
-final_output = completed_steps[-1]
-print(f"\nFinal output of the workflow: {final_output}")
+    print(f"\nExecuting step: {step}")
+    
+    if "User Story" in step:
+        response = product_manager_support_function(step)
+        project_plan["user_stories"].append(response)
+    elif "Feature" in step:
+        response = program_manager_support_function(step)
+        project_plan["features"].append(response)
+    elif "Task" in step:
+        response = development_engineer_support_function(step)
+        project_plan["tasks"].append(response)
+    elif "Month" in step:
+        project_plan["timeline"].append(step)
+    elif "review" in step_lower or "feedback" in step_lower:
+        project_plan["review"].append(step)
+    else:
+        response = routing_agent.route(step)
+        project_plan.setdefault("others", []).append(response)
+
+# Mostrar el plan final en consola
+def print_project_plan(plan):
+    print("\n*** Final Project Plan ***\n")
+
+    for feature, story, task in zip(plan["features"], plan["user_stories"], plan["tasks"]):
+        print("🧩 Feature:")
+        print(f"- {feature.strip()}\n")
+
+        print("👤 User Story:")
+        print(f"{story.strip()}\n")
+
+        print("🧰 Development Task:")
+        print(f"{task.strip()}\n")
+        print("---\n")
+
+    if plan.get("timeline"):
+        print("📅 Development Timeline:")
+        for item in plan["timeline"]:
+            print(f"- {item.strip()}")
+        print("\n")
+
+    if plan.get("review"):
+        print("🔍 Review and Iteration:")
+        for item in plan["review"]:
+            print(f"- {item.strip()}")
+        print("\n")
+
+print_project_plan(project_plan)
